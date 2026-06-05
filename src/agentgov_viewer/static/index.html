@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>agentgov viewer</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --fg:#c9d1d9; --muted:#8b949e;
+          --ok:#2ea043; --bad:#f85149; --warn:#d29922; --accent:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+         background:var(--bg); color:var(--fg); }
+  header { padding:10px 16px; border-bottom:1px solid var(--border); display:flex;
+           gap:16px; align-items:center; }
+  header h1 { font-size:15px; margin:0; }
+  select, button { background:var(--panel); color:var(--fg); border:1px solid var(--border);
+           border-radius:6px; padding:4px 8px; font:inherit; }
+  #verify { margin-left:auto; }
+  .layout { display:grid; grid-template-columns:minmax(380px,1fr) minmax(380px,1.2fr);
+            height:calc(100vh - 49px); }
+  .col { overflow:auto; padding:12px; }
+  .col + .col { border-left:1px solid var(--border); }
+  .call { border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-bottom:8px;
+          cursor:pointer; background:var(--panel); }
+  .call:hover { border-color:var(--accent); }
+  .call.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .row { display:flex; gap:8px; align-items:center; }
+  .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .committed .dot { background:var(--ok); }
+  .rejected .dot { background:var(--bad); }
+  .pending .dot { background:var(--muted); }
+  .name { font-weight:600; }
+  .muted { color:var(--muted); }
+  .pill { font-size:11px; padding:1px 6px; border-radius:10px; border:1px solid var(--border); }
+  .badge { font-size:11px; padding:1px 6px; border-radius:10px; }
+  .badge.rail { background:rgba(248,81,73,.15); color:var(--bad); }
+  .badge.ckpt { background:rgba(210,153,34,.15); color:var(--warn); }
+  h2 { font-size:13px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  pre { background:#0b0f14; border:1px solid var(--border); border-radius:6px; padding:8px;
+        overflow:auto; white-space:pre-wrap; word-break:break-word; }
+  table { width:100%; border-collapse:collapse; }
+  td,th { text-align:left; padding:3px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .empty { color:var(--muted); padding:24px; text-align:center; }
+  code.k { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>agentgov</h1>
+  <label>source
+    <select id="source">
+      <option value="local">local file(s)</option>
+      <option value="store">ingest store</option>
+    </select>
+  </label>
+  <button id="reload">reload</button>
+  <span id="verify" class="pill">chain: —</span>
+</header>
+<div class="layout">
+  <div class="col" id="timeline"></div>
+  <div class="col" id="inspector"><div class="empty">select a call</div></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let CALLS = [];
+
+async function jget(url){ const r = await fetch(url); return r.json(); }
+
+function statusBadges(c){
+  let b = '';
+  if(c.rails && c.rails.length) b += `<span class="badge rail">${c.rails.length} rail</span> `;
+  if(c.checkpoints && c.checkpoints.length) b += `<span class="badge ckpt">checkpoint</span> `;
+  return b;
+}
+
+function renderTimeline(){
+  const el = $('#timeline');
+  if(!CALLS.length){ el.innerHTML = '<div class="empty">no events for this source</div>'; return; }
+  el.innerHTML = CALLS.map((c,i) => `
+    <div class="call ${c.status}" data-i="${i}">
+      <div class="row">
+        <span class="dot"></span>
+        <span class="name">${c.tool_name ?? '(unknown)'}</span>
+        <span class="muted">${c.layer ?? ''}</span>
+        <span style="margin-left:auto" class="muted">${c.duration_ms!=null ? c.duration_ms.toFixed(1)+'ms':''}</span>
+      </div>
+      <div class="row muted" style="margin-top:4px">
+        <span>#${c.seq}</span><span>${c.status}</span>${statusBadges(c)}
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('.call').forEach(n => n.onclick = () => select(+n.dataset.i, n));
+}
+
+function kv(obj){
+  return Object.entries(obj).map(([k,v]) =>
+    `<tr><td><code class="k">${k}</code></td><td>${typeof v==='object'?`<pre>${JSON.stringify(v,null,2)}</pre>`:String(v)}</td></tr>`).join('');
+}
+
+async function select(i, node){
+  document.querySelectorAll('.call').forEach(n=>n.classList.remove('sel'));
+  if(node) node.classList.add('sel');
+  const c = CALLS[i];
+  const src = $('#source').value;
+  const events = await jget(`/api/events?source=${src}&session_id=${encodeURIComponent(c.session_id)}&turn_id=${encodeURIComponent(c.turn_id)}`);
+  const insp = $('#inspector');
+  insp.innerHTML = `
+    <h2>${c.tool_name ?? '(unknown)'} — <span class="${c.status}">${c.status}</span></h2>
+    <table>${kv({session:c.session_id, turn:c.turn_id, layer:c.layer, duration_ms:c.duration_ms})}</table>
+    ${c.error ? `<h2>error</h2><pre>${JSON.stringify(c.error,null,2)}</pre>`:''}
+    ${c.rails.length ? `<h2>rail violations</h2><pre>${JSON.stringify(c.rails,null,2)}</pre>`:''}
+    ${c.mutations.length ? `<h2>mutations (${c.mutations.length})</h2><pre>${JSON.stringify(c.mutations,null,2)}</pre>`:'<h2>mutations</h2><div class="muted">none</div>'}
+    ${c.checkpoints.length ? `<h2>checkpoints</h2><pre>${JSON.stringify(c.checkpoints,null,2)}</pre>`:''}
+    <h2>raw events (${events.length})</h2>
+    <pre>${JSON.stringify(events,null,2)}</pre>`;
+}
+
+async function load(){
+  const src = $('#source').value;
+  CALLS = await jget(`/api/calls?source=${src}`);
+  renderTimeline();
+  $('#inspector').innerHTML = '<div class="empty">select a call</div>';
+  try {
+    const v = await jget(`/api/verify?source=${src}`);
+    const el = $('#verify');
+    el.textContent = `chain: ${v.ok ? 'verified ✓' : 'BROKEN ✗'}`;
+    el.style.color = v.ok ? 'var(--ok)' : 'var(--bad)';
+  } catch { $('#verify').textContent = 'chain: —'; }
+}
+
+$('#reload').onclick = load;
+$('#source').onchange = load;
+load();
+</script>
+</body>
+</html>
