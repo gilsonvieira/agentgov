@@ -153,8 +153,16 @@ class Harness:
             turn_id=turn,
         )
         self._bind_checkpoint(ctx, turn)
+        artifacts_before = set(self.artifacts)
         result = run_tool(spec, args, ctx, rails=self._rails, log=self.log, mode=self.mode)
         self.state = result.state
+        if not result.ok:
+            # Artifact invalidation: a rejected step's scratch handles (e.g. a
+            # rejected model's estimator) are keyed to the call that produced
+            # them; evict them on rollback so a later step cannot read a stale
+            # "validated" object. Audited state already rolled back in run_tool.
+            for key in set(self.artifacts) - artifacts_before:
+                del self.artifacts[key]
         return result
 
     # ------------------------------------------------------------- finalization
