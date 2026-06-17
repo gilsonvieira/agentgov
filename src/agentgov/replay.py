@@ -9,6 +9,7 @@ tampered with after the fact.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 from collections.abc import Iterable, Iterator
@@ -40,7 +41,10 @@ def replay(events: Iterable[Event]) -> State:
     state: State = {}
     for event in events:
         if isinstance(event, StateMutationEvent):
-            apply(state, Mutation(op=event.op, path=event.path, value=event.value))
+            # Deep-copy the value: a set-at-nested-path mutation would otherwise
+            # mutate a prior event's payload in place (shared reference),
+            # corrupting its event_hash and breaking verify_chain.
+            apply(state, Mutation(op=event.op, path=event.path, value=copy.deepcopy(event.value)))
     return state
 
 
