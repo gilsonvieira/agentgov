@@ -121,6 +121,82 @@ class RunHaltedEvent(_EventBase):
     actor: str
 
 
+class PlanProposedEvent(_EventBase):
+    """A planner proposed a development plan (before it is gated)."""
+
+    type: Literal["plan.proposed"] = "plan.proposed"
+    plan: dict[str, Any]
+
+
+class PlanAmendedEvent(_EventBase):
+    """A human edited the proposed plan at the plan-review gate."""
+
+    type: Literal["plan.amended"] = "plan.amended"
+    actor: str
+    reason: str | None = None
+    plan: dict[str, Any]
+
+
+class PlanApprovedEvent(_EventBase):
+    """A human approved the (possibly amended) plan; execution may begin."""
+
+    type: Literal["plan.approved"] = "plan.approved"
+    actor: str
+    reason: str | None = None
+    plan: dict[str, Any]
+
+
+class PlanRejectedEvent(_EventBase):
+    """A human rejected the plan; the run does not execute."""
+
+    type: Literal["plan.rejected"] = "plan.rejected"
+    actor: str
+    reason: str | None = None
+
+
+class StageEnteredEvent(_EventBase):
+    """A workflow stage was entered (its entry gate passed)."""
+
+    type: Literal["stage.entered"] = "stage.entered"
+    stage_id: str
+
+
+class StageExitedEvent(_EventBase):
+    """A workflow stage finished; ``status`` records how it ended."""
+
+    type: Literal["stage.exited"] = "stage.exited"
+    stage_id: str
+    status: str
+    reason: str | None = None
+
+
+class DecisionEvent(_EventBase):
+    """A decision node was resolved. ``kind`` records who decided it.
+
+    ``kind`` is one of ``rule`` / ``search`` / ``judgment`` / ``human`` — the
+    least-powerful-sufficient decider. For ``judgment``/``search`` the chosen
+    args reach state only through a gated tool call (invariant I3).
+    """
+
+    type: Literal["decision.made"] = "decision.made"
+    node: str
+    kind: str
+    provider: str
+    tool: str | None = None
+    chosen_args: dict[str, Any] = {}
+    rationale: str | None = None
+
+
+class CriticFindingEvent(_EventBase):
+    """An adversarial critic reported a finding (advisory, surfaced to a human)."""
+
+    type: Literal["critic.finding"] = "critic.finding"
+    model_id: str
+    severity: str
+    category: str
+    message: str
+
+
 class FinalizeAttemptedEvent(_EventBase):
     """A finalize gate was attempted; ``outcome`` records pass/block/halt."""
 
@@ -139,6 +215,14 @@ Event = Annotated[
         CheckpointRequestedEvent,
         CheckpointDecidedEvent,
         RunHaltedEvent,
+        PlanProposedEvent,
+        PlanAmendedEvent,
+        PlanApprovedEvent,
+        PlanRejectedEvent,
+        StageEnteredEvent,
+        StageExitedEvent,
+        DecisionEvent,
+        CriticFindingEvent,
         FinalizeAttemptedEvent,
     ],
     Field(discriminator="type"),
@@ -153,6 +237,14 @@ EVENT_TYPES: dict[str, type[_EventBase]] = {
     "checkpoint.requested": CheckpointRequestedEvent,
     "checkpoint.decided": CheckpointDecidedEvent,
     "run.halted": RunHaltedEvent,
+    "plan.proposed": PlanProposedEvent,
+    "plan.amended": PlanAmendedEvent,
+    "plan.approved": PlanApprovedEvent,
+    "plan.rejected": PlanRejectedEvent,
+    "stage.entered": StageEnteredEvent,
+    "stage.exited": StageExitedEvent,
+    "decision.made": DecisionEvent,
+    "critic.finding": CriticFindingEvent,
     "finalize.attempted": FinalizeAttemptedEvent,
 }
 
@@ -173,10 +265,18 @@ __all__ = [
     "EVENT_TYPES",
     "CheckpointDecidedEvent",
     "CheckpointRequestedEvent",
+    "CriticFindingEvent",
+    "DecisionEvent",
     "Event",
     "FinalizeAttemptedEvent",
+    "PlanAmendedEvent",
+    "PlanApprovedEvent",
+    "PlanProposedEvent",
+    "PlanRejectedEvent",
     "RailViolatedEvent",
     "RunHaltedEvent",
+    "StageEnteredEvent",
+    "StageExitedEvent",
     "StateMutationEvent",
     "ToolCommittedEvent",
     "ToolRejectedEvent",
