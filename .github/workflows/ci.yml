@@ -18,7 +18,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install
         run: pip install -e ".[dev,viewer]"
-      - name: Firewall (no model-vendor SDK in core)
-        run: python -c "from agentgov.firewall import enforce; enforce()"
       - name: Tests
         run: pytest

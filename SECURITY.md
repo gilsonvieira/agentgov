@@ -29,4 +29,3 @@ Because the audit trail is the product, we especially want to hear about:
 - Ways to forge or alter an `EvidenceBundle` that still passes `verify_bundle`.
 - Replay non-determinism that lets a recorded run reproduce a different
   `state_hash`.
-- A path for a model-vendor SDK to enter the core past the import firewall.

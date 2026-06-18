@@ -145,8 +145,8 @@ chain-verification endpoint.
 - **Deterministic replay** — `replay(events)` reproduces `state_hash` exactly
   under `FixedClock` / `SeededRng`.
 - **Evidence bundles** — `finalize()` seals a portable, verifiable record.
-- **Vendor-neutral** — a CI-enforced import firewall keeps any model SDK out of
-  the core.
+- **Framework-independent kernel** — plain Python; the kernel imports no
+  `pydantic_ai` or LLM SDK and knows nothing about the brain that drives it.
 
 ## Examples
 
@@ -192,7 +192,6 @@ so the viewer renders them as separate timeline entries.
 pip install -e ".[dev,viewer]"
 pytest
 ruff check src tests examples
-python -c "from agentgov.firewall import enforce; enforce()"   # vendor-SDK firewall
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and

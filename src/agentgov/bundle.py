@@ -38,6 +38,9 @@ class EvidenceBundle(BaseModel):
     created_at: datetime
     agentgov_version: str
     mode: str
+    # How the run ended: "finalized" (clean promotion gate) or "halted"
+    # (an analyst stopped the run at a checkpoint). Reads differently in review.
+    terminal: str
     tool_names: tuple[str, ...]
     final_state: dict[str, Any]
     final_state_hash: str
@@ -74,6 +77,7 @@ def build_bundle(
     report: dict[str, Any] | None = None,
     event_log_ref: str | None = None,
     findings: Sequence[dict[str, Any]] = (),
+    terminal: str = "finalized",
 ) -> EvidenceBundle:
     """Assemble and seal an :class:`EvidenceBundle` from a finished session."""
     checkpoints = tuple(
@@ -87,6 +91,7 @@ def build_bundle(
         created_at=datetime.now().astimezone(),
         agentgov_version=agentgov_version,
         mode=mode,
+        terminal=terminal,
         tool_names=tuple(tool_names),
         final_state=state,
         final_state_hash=state_hash(state),

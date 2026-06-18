@@ -5,6 +5,11 @@ A tool calls ``ctx.checkpoint(trigger=..., proposal=...)`` to pause for a human
 emits a ``checkpoint.requested`` event, asks the responder, and emits
 ``checkpoint.decided``. If there is no responder or the decision is to block,
 the tool call is rejected and its mutations roll back — the gate holds.
+
+A decision can also *halt* the run (``decision`` of ``"halt"``/``"stop"``/
+``"abort"``): the step still rolls back, but instead of letting the agent
+re-plan, the harness records a terminal ``run.halted`` event and stops. See
+:attr:`CheckpointDecision.halt`.
 """
 
 from __future__ import annotations
@@ -26,6 +31,11 @@ class CheckpointDecision:
     def approved(self) -> bool:
         """True iff the decision green-lights the proposed action."""
         return self.decision.lower() in {"approve", "approved", "allow", "yes"}
+
+    @property
+    def halt(self) -> bool:
+        """True iff the analyst chose to halt the whole run (not just reject the step)."""
+        return self.decision.lower() in {"halt", "stop", "abort"}
 
 
 @runtime_checkable

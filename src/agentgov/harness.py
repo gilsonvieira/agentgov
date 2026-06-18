@@ -22,13 +22,14 @@ from pydantic import BaseModel
 from .bundle import EvidenceBundle, build_bundle
 from .checkpoints import CheckpointResponder, checkpoint_id
 from .context import ToolContext
-from .contracts import CheckpointPending, Result, ToolSpec
+from .contracts import CheckpointPending, Result, RunHalted, ToolSpec
 from .eventlog import JsonlEventLog, NoopRedactor, Redactor
 from .events import (
     CheckpointDecidedEvent,
     CheckpointRequestedEvent,
     Event,
     FinalizeAttemptedEvent,
+    RunHaltedEvent,
 )
 from .executor import EventLog, Mode, ToolRunResult, run_tool
 from .hosts import Clock, DefaultRng, Rng, SystemClock
@@ -84,6 +85,7 @@ class Harness:
         self.session_id = session_id or self.rng.uuid()
         self._rails: list[Rail] = []
         self._turn = 0
+        self._halted = False
         if log is not None:
             self.log: EventLog = log
         else:
@@ -144,6 +146,14 @@ class Harness:
         spec: ToolSpec[Any, R] = self.registry.get(tool_name)
         turn = turn_id or f"turn-{self._turn}"
         self._turn += 1
+        if self._halted:
+            # The run was halted at an earlier checkpoint; refuse further work
+            # so a driver that keeps calling cannot advance a stopped run.
+            err = RunHalted(
+                checkpoint_id="", trigger="(halted)", actor="",
+                reason="run already halted; no further calls are governed",
+            )
+            return ToolRunResult(False, None, self.state, err, ())
         ctx = ToolContext(
             state=self.state,
             clock=self.clock,
@@ -163,7 +173,28 @@ class Harness:
             # "validated" object. Audited state already rolled back in run_tool.
             for key in set(self.artifacts) - artifacts_before:
                 del self.artifacts[key]
+            # A halt is terminal, not a re-planable rejection: mark the run
+            # halted and write the terminal record so the bundle reads as halted.
+            if isinstance(result.error, RunHalted):
+                self._halted = True
+                self.log.emit(
+                    RunHaltedEvent(
+                        event_id=self.rng.uuid(),
+                        session_id=self.session_id,
+                        turn_id=turn,
+                        timestamp=self.clock.now(),
+                        checkpoint_id=result.error.checkpoint_id,
+                        trigger=result.error.trigger,
+                        reason=result.error.reason,
+                        actor=result.error.actor,
+                    )
+                )
         return result
+
+    @property
+    def halted(self) -> bool:
+        """True once an analyst has halted the run at a checkpoint."""
+        return self._halted
 
     # ------------------------------------------------------------- finalization
     def finalize(
@@ -171,14 +202,63 @@ class Harness:
         *,
         report: dict[str, Any] | None = None,
         write_bundle: bool = False,
+        reason: str = "complete",
     ) -> FinalizeResult:
         """Run the terminal gate: all rails over final state, then seal a bundle.
 
-        Every rail (including ``finalize_only`` ones) runs over the current
-        state. If any rejects, a blocked ``finalize.attempted`` event is logged
-        and no bundle is produced. On a clean pass, a sealed
-        :class:`EvidenceBundle` is built from the full event log.
+        On a *complete* run, every rail (including ``finalize_only`` ones) runs
+        over the current state. If any rejects, a blocked ``finalize.attempted``
+        event is logged and no bundle is produced. On a clean pass, a sealed
+        :class:`EvidenceBundle` is built with ``terminal="finalized"``.
+
+        On a *halted* run — either ``reason="halted"`` was passed or an analyst
+        halted the run at a checkpoint (``self.halted``) — the promotion gate is
+        moot: a halted run is never a clean promotion. A bundle is still sealed,
+        with ``terminal="halted"``, so the evidence record explains the stop.
+        ``ok`` is ``False`` for a halted run.
         """
+        halted = self._halted or reason == "halted"
+        from . import __version__
+
+        ref = str(self.log.path) if isinstance(self.log, JsonlEventLog) else None
+
+        def _seal(terminal: str) -> EvidenceBundle:
+            return build_bundle(
+                app=self.app,
+                session_id=self.session_id,
+                events=self._all_events(),
+                state=self.state,
+                agentgov_version=__version__,
+                mode=self.mode,
+                tool_names=self.registry.names(),
+                report=report,
+                event_log_ref=ref,
+                terminal=terminal,
+            )
+
+        def _write(bundle: EvidenceBundle) -> None:
+            if write_bundle and isinstance(self.log, JsonlEventLog):
+                out = self.log.path.with_suffix(".bundle.json")
+                out.write_text(
+                    json.dumps(bundle.model_dump(mode="json"), indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+
+        if halted:
+            self.log.emit(
+                FinalizeAttemptedEvent(
+                    event_id=self.rng.uuid(),
+                    session_id=self.session_id,
+                    turn_id="finalize",
+                    timestamp=self.clock.now(),
+                    outcome="halted",
+                    blocking_rail_ids=(),
+                )
+            )
+            bundle = _seal("halted")
+            _write(bundle)
+            return FinalizeResult(ok=False, violations=(), bundle=bundle)
+
         violations = tuple(run_finalize_rails(self._rails, self.state))
         outcome = "blocked" if violations else "succeeded"
         self.log.emit(
@@ -194,26 +274,8 @@ class Harness:
         if violations:
             return FinalizeResult(ok=False, violations=violations, bundle=None)
 
-        from . import __version__
-
-        ref = str(self.log.path) if isinstance(self.log, JsonlEventLog) else None
-        bundle = build_bundle(
-            app=self.app,
-            session_id=self.session_id,
-            events=self._all_events(),
-            state=self.state,
-            agentgov_version=__version__,
-            mode=self.mode,
-            tool_names=self.registry.names(),
-            report=report,
-            event_log_ref=ref,
-        )
-        if write_bundle and isinstance(self.log, JsonlEventLog):
-            out = self.log.path.with_suffix(".bundle.json")
-            out.write_text(
-                json.dumps(bundle.model_dump(mode="json"), indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
+        bundle = _seal("finalized")
+        _write(bundle)
         return FinalizeResult(ok=True, violations=(), bundle=bundle)
 
     def _all_events(self) -> list[Event]:
@@ -256,6 +318,13 @@ class Harness:
                     actor=decision.actor,
                 )
             )
+            if decision.halt:
+                raise RunHalted(
+                    checkpoint_id=cid,
+                    trigger=trigger,
+                    actor=decision.actor,
+                    reason=decision.reason,
+                )
             if not decision.approved:
                 raise CheckpointPending(
                     f"checkpoint {trigger!r} denied by {decision.actor}"

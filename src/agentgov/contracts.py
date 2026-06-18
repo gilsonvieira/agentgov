@@ -87,12 +87,41 @@ class CheckpointPending(ToolError):
     kind = "checkpoint_pending"
 
 
+class RunHalted(ToolError):
+    """An analyst halted the whole run at a checkpoint.
+
+    A *reject step* (``CheckpointPending`` / ``RailViolation``) rolls back and
+    the agent re-plans. A *halt* is terminal: the harness records a
+    ``run.halted`` event and the run stops. The triggering step still rolls
+    back (its body never returned), but the outcome is the end of the run, not
+    a retry. The harness reads these attributes to emit the terminal record.
+    """
+
+    kind = "run_halted"
+
+    def __init__(
+        self,
+        *,
+        checkpoint_id: str,
+        trigger: str,
+        actor: str,
+        reason: str | None = None,
+    ) -> None:
+        """Carry the checkpoint identity and the analyst's decision metadata."""
+        super().__init__(f"run halted at checkpoint {trigger!r} by {actor}")
+        self.checkpoint_id = checkpoint_id
+        self.trigger = trigger
+        self.actor = actor
+        self.reason = reason
+
+
 __all__ = [
     "CheckpointPending",
     "PostconditionError",
     "PreconditionError",
     "RailViolation",
     "Result",
+    "RunHalted",
     "ToolError",
     "ToolSpec",
 ]
