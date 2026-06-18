@@ -42,6 +42,7 @@ from .contracts import (
     PreconditionError,
     RailViolation,
     Result,
+    RunHalted,
     ToolError,
     ToolSpec,
 )
@@ -93,6 +94,7 @@ __all__ = [
     "Registry",
     "Result",
     "Rng",
+    "RunHalted",
     "SeededRng",
     "State",
     "Storage",

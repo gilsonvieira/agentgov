@@ -21,14 +21,13 @@ Run the full local gate — CI runs the same checks on Python 3.12 and 3.13:
 ```bash
 ruff check src tests examples
 pytest
-python -c "from agentgov.firewall import enforce; enforce()"
 ```
 
 - **Tests must pass and stay deterministic.** Use `FixedClock` and `SeededRng`
   in tests so replay assertions hold.
-- **The import firewall must stay green.** The core (`src/agentgov`) must not
-  import any model-vendor SDK. Vendor integrations belong in adapters or
-  examples, never in the core.
+- **Keep the kernel framework-independent.** The core (`src/agentgov`) must not
+  import `pydantic_ai` or any LLM SDK — the kernel governs decisions and knows
+  nothing about the brain that drives it.
 - **Add tests for new behavior.** Rails, the transaction boundary, replay,
   checkpoints, and finalize are the load-bearing parts — cover them.
 

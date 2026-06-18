@@ -106,11 +106,26 @@ class CheckpointDecidedEvent(_EventBase):
     actor: str
 
 
+class RunHaltedEvent(_EventBase):
+    """A terminal record: an analyst halted the run at a checkpoint.
+
+    Distinct from a step rejection. A rejected step rolls back and the agent
+    re-plans; a *halt* stops the run — the bundle seals as ``terminal="halted"``
+    and reads differently from a clean finalize.
+    """
+
+    type: Literal["run.halted"] = "run.halted"
+    checkpoint_id: str
+    trigger: str
+    reason: str | None = None
+    actor: str
+
+
 class FinalizeAttemptedEvent(_EventBase):
-    """A finalize gate was attempted; ``outcome`` records pass/block."""
+    """A finalize gate was attempted; ``outcome`` records pass/block/halt."""
 
     type: Literal["finalize.attempted"] = "finalize.attempted"
-    outcome: Literal["succeeded", "blocked"]
+    outcome: Literal["succeeded", "blocked", "halted"]
     blocking_rail_ids: tuple[str, ...] = ()
 
 
@@ -123,6 +138,7 @@ Event = Annotated[
         StateMutationEvent,
         CheckpointRequestedEvent,
         CheckpointDecidedEvent,
+        RunHaltedEvent,
         FinalizeAttemptedEvent,
     ],
     Field(discriminator="type"),
@@ -136,6 +152,7 @@ EVENT_TYPES: dict[str, type[_EventBase]] = {
     "state.mutation": StateMutationEvent,
     "checkpoint.requested": CheckpointRequestedEvent,
     "checkpoint.decided": CheckpointDecidedEvent,
+    "run.halted": RunHaltedEvent,
     "finalize.attempted": FinalizeAttemptedEvent,
 }
 
@@ -159,6 +176,7 @@ __all__ = [
     "Event",
     "FinalizeAttemptedEvent",
     "RailViolatedEvent",
+    "RunHaltedEvent",
     "StateMutationEvent",
     "ToolCommittedEvent",
     "ToolRejectedEvent",
