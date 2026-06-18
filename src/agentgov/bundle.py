@@ -21,7 +21,15 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from .events import CheckpointDecidedEvent, Event
+from .events import (
+    CheckpointDecidedEvent,
+    CriticFindingEvent,
+    DecisionEvent,
+    Event,
+    PlanApprovedEvent,
+    PlanProposedEvent,
+    StageExitedEvent,
+)
 from .replay import verify_chain
 from .state import State, state_hash
 
@@ -50,6 +58,17 @@ class EvidenceBundle(BaseModel):
     findings: tuple[dict[str, Any], ...] = ()
     report: dict[str, Any] | None = None
     event_log_ref: str | None = None
+    # Workflow provenance (populated for governed-workflow runs; empty otherwise).
+    # The control flow is reconstructed from the event log — the bundle is
+    # self-describing (invariant I2).
+    workflow_id: str | None = None
+    workflow_version: str | None = None
+    plan: dict[str, Any] = {}
+    stage_trace: tuple[dict[str, Any], ...] = ()
+    decisions: tuple[dict[str, Any], ...] = ()
+    critic_findings: tuple[dict[str, Any], ...] = ()
+    # The human-readable model-development narrative authored by the Scribe.
+    narrative: str | None = None
     manifest_hash: str | None = None
 
     def sealed(self) -> EvidenceBundle:
@@ -78,12 +97,38 @@ def build_bundle(
     event_log_ref: str | None = None,
     findings: Sequence[dict[str, Any]] = (),
     terminal: str = "finalized",
+    workflow_id: str | None = None,
+    workflow_version: str | None = None,
+    narrative: str | None = None,
 ) -> EvidenceBundle:
-    """Assemble and seal an :class:`EvidenceBundle` from a finished session."""
+    """Assemble and seal an :class:`EvidenceBundle` from a finished session.
+
+    Workflow provenance (the approved plan, the stage trace, the decisions, and
+    the critic findings) is reconstructed from the event log so the bundle is
+    self-describing — the control flow can be read back without rerunning.
+    """
+    events = list(events)
     checkpoints = tuple(
-        e.model_dump(mode="json")
+        e.model_dump(mode="json") for e in events if isinstance(e, CheckpointDecidedEvent)
+    )
+    approved = [e for e in events if isinstance(e, PlanApprovedEvent)]
+    proposed = [e for e in events if isinstance(e, PlanProposedEvent)]
+    plan = approved[-1].plan if approved else (proposed[-1].plan if proposed else {})
+    stage_trace = tuple(
+        {"stage_id": e.stage_id, "status": e.status, "reason": e.reason}
         for e in events
-        if isinstance(e, CheckpointDecidedEvent)
+        if isinstance(e, StageExitedEvent)
+    )
+    decisions = tuple(
+        {"node": e.node, "kind": e.kind, "provider": e.provider, "tool": e.tool,
+         "chosen_args": e.chosen_args, "rationale": e.rationale}
+        for e in events
+        if isinstance(e, DecisionEvent)
+    )
+    critic_findings = tuple(
+        {"model_id": e.model_id, "severity": e.severity, "category": e.category, "message": e.message}
+        for e in events
+        if isinstance(e, CriticFindingEvent)
     )
     bundle = EvidenceBundle(
         app=app,
@@ -101,6 +146,13 @@ def build_bundle(
         findings=tuple(findings),
         report=report,
         event_log_ref=event_log_ref,
+        workflow_id=workflow_id,
+        workflow_version=workflow_version,
+        plan=plan,
+        stage_trace=stage_trace,
+        decisions=decisions,
+        critic_findings=critic_findings,
+        narrative=narrative,
     )
     return bundle.sealed()
 

@@ -20,7 +20,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from .bundle import EvidenceBundle, build_bundle
-from .checkpoints import CheckpointResponder, checkpoint_id
+from .checkpoints import CheckpointDecision, CheckpointResponder, checkpoint_id
 from .context import ToolContext
 from .contracts import CheckpointPending, Result, RunHalted, ToolSpec
 from .eventlog import JsonlEventLog, NoopRedactor, Redactor
@@ -196,6 +196,52 @@ class Harness:
         """True once an analyst has halted the run at a checkpoint."""
         return self._halted
 
+    # ------------------------------------------------- workflow-level gating
+    def request_decision(
+        self, *, trigger: str, proposal: str, turn_id: str | None = None
+    ) -> CheckpointDecision:
+        """Raise a governed checkpoint outside a tool body and return the decision.
+
+        Used by the workflow engine for control-flow gates (plan review,
+        fairness, promotion) that the workflow owns explicitly rather than
+        burying inside a tool. Emits ``checkpoint.requested`` and
+        ``checkpoint.decided`` exactly like the in-tool path, but returns the
+        :class:`CheckpointDecision` instead of raising, so the engine decides
+        what the control flow does next.
+        """
+        turn = turn_id or "gate"
+        cid = checkpoint_id(trigger, proposal)
+        self.log.emit(
+            CheckpointRequestedEvent(
+                event_id=self.rng.uuid(), session_id=self.session_id, turn_id=turn,
+                timestamp=self.clock.now(), checkpoint_id=cid, trigger=trigger, proposal=proposal,
+            )
+        )
+        if self.responder is None:
+            return CheckpointDecision(decision="deny", actor="auto", reason="no responder")
+        decision = self.responder.respond(checkpoint_id=cid, trigger=trigger, proposal=proposal)
+        self.log.emit(
+            CheckpointDecidedEvent(
+                event_id=self.rng.uuid(), session_id=self.session_id, turn_id=turn,
+                timestamp=self.clock.now(), checkpoint_id=cid, decision=decision.decision,
+                reason=decision.reason, actor=decision.actor,
+            )
+        )
+        return decision
+
+    def mark_halted(self, *, trigger: str, actor: str, reason: str | None = None) -> None:
+        """Record a terminal halt initiated by the workflow (analyst gate)."""
+        if self._halted:
+            return
+        self._halted = True
+        self.log.emit(
+            RunHaltedEvent(
+                event_id=self.rng.uuid(), session_id=self.session_id, turn_id="gate",
+                timestamp=self.clock.now(), checkpoint_id=checkpoint_id(trigger, actor),
+                trigger=trigger, reason=reason, actor=actor,
+            )
+        )
+
     # ------------------------------------------------------------- finalization
     def finalize(
         self,
@@ -203,6 +249,9 @@ class Harness:
         report: dict[str, Any] | None = None,
         write_bundle: bool = False,
         reason: str = "complete",
+        workflow_id: str | None = None,
+        workflow_version: str | None = None,
+        narrative: str | None = None,
     ) -> FinalizeResult:
         """Run the terminal gate: all rails over final state, then seal a bundle.
 
@@ -234,6 +283,9 @@ class Harness:
                 report=report,
                 event_log_ref=ref,
                 terminal=terminal,
+                workflow_id=workflow_id,
+                workflow_version=workflow_version,
+                narrative=narrative,
             )
 
         def _write(bundle: EvidenceBundle) -> None:
