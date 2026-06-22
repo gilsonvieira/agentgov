@@ -125,13 +125,23 @@ assert verify_bundle(result.bundle)               # seal + state hash check
 
 ### 6. Open the viewer
 
+Point `--runs` at the `.agentgov` directory to load every app's logs
+recursively (or `--log` a single file):
+
 ```bash
-agentgov-viewer --log .agentgov/refunds-agent/<session>.jsonl
+agentgov-viewer --runs .agentgov                       # all apps under .agentgov
+agentgov-viewer --log .agentgov/<app>/<session>.jsonl  # one specific log
 ```
 
-A timeline of sessions → turns → tool calls (committed/rejected, with rail
-violations and checkpoints inline), plus a per-call inspector and a
-chain-verification endpoint.
+Then open http://127.0.0.1:8000. The default source is `local`; if the timeline
+is empty, the process found no `.jsonl` under the path you gave it — check that
+`--runs`/`--log` points at the directory your run actually wrote to (e.g.
+`.agentgov/credit-modeling-agent/` for the credit workflow).
+
+A timeline of tool calls (one row per call — committed/rejected, with the
+driving decision, rail violations, and checkpoints inline), plus a per-call
+inspector and a chain-verification endpoint. Workflow-level events (plan, stage,
+gate, finalize) are in the raw `/api/events` stream behind each call.
 
 ## What you get
 

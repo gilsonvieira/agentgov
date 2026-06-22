@@ -56,6 +56,12 @@ def _build_calls(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     for (session_id, turn_id), evs in by_turn.items():
         evs.sort(key=lambda e: e.get("seq", 0))
+        # A "call" is a tool invocation. Workflow-level turns (plan / gate /
+        # stage markers / finalize / critic findings) carry no tool.requested;
+        # they would otherwise render as empty "(unknown)" rows. Skip them here
+        # — they remain visible in the raw /api/events stream and /api/verify.
+        if not any(e["type"] == "tool.requested" for e in evs):
+            continue
         status = "pending"
         tool_name = None
         layer = None
@@ -64,11 +70,14 @@ def _build_calls(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         mutations = []
         rails = []
         checkpoints = []
+        decision = None
         for e in evs:
             t = e["type"]
             if t == "tool.requested":
                 tool_name = e.get("tool_name")
                 layer = e.get("layer")
+            elif t == "decision.made":
+                decision = {"node": e.get("node"), "kind": e.get("kind"), "rationale": e.get("rationale")}
             elif t in _COMMIT_TYPES:
                 status = "committed"
                 tool_name = e.get("tool_name", tool_name)
@@ -97,6 +106,7 @@ def _build_calls(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "mutations": mutations,
                 "rails": rails,
                 "checkpoints": checkpoints,
+                "decision": decision,
                 "event_count": len(evs),
             }
         )

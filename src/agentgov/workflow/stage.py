@@ -50,15 +50,28 @@ class StageContext:
         # Ephemeral, non-audited orchestration state passed between stages
         # (e.g. the id of the candidate just trained). Not governed state.
         self.scratch = scratch
+        self._turn_seq = 0
 
     @property
     def state(self) -> dict[str, Any]:
         """The current governed state (read-only view for stage logic)."""
         return self.hz.state
 
+    def _mint(self, label: str) -> str:
+        """Mint a unique, stage-readable turn id so each call is a distinct entry.
+
+        A stage can be re-entered (retries consume the iteration budget), so a
+        plain stage label would collapse every attempt into one timeline row.
+        The ``label#n`` form keeps the stage readable while staying unique per
+        call, so the viewer shows one row per attempt — including rejections.
+        """
+        turn = f"{label}#{self._turn_seq}"
+        self._turn_seq += 1
+        return turn
+
     def call(self, tool: str, args: dict[str, Any], *, turn_id: str | None = None) -> ToolRunResult:
-        """Run a deterministic governed tool by name."""
-        return self.hz.call(tool, args, turn_id=turn_id)
+        """Run a deterministic governed tool by name (one timeline entry per call)."""
+        return self.hz.call(tool, args, turn_id=self._mint(turn_id or "call"))
 
     def decide(
         self,
@@ -79,10 +92,13 @@ class StageContext:
         """
         from ..events import DecisionEvent
 
+        # One turn id for the whole decision: the DecisionEvent and the gated
+        # tool call it drives group into a single timeline entry.
+        turn = self._mint(turn_id or node)
         proposal = self.advisor.advise(question=question, state=self.hz.state, context=context or {})
         self.hz.log.emit(
             DecisionEvent(
-                **_base(self.hz, turn_id or node),
+                **_base(self.hz, turn),
                 node=node,
                 kind=kind,
                 provider=type(self.advisor).__name__,
@@ -91,7 +107,7 @@ class StageContext:
                 rationale=proposal.rationale,
             )
         )
-        return self.hz.call(then_tool, proposal.args, turn_id=turn_id or node)
+        return self.hz.call(then_tool, proposal.args, turn_id=turn)
 
     def critique(self, *, model_id: str, reports: dict[str, Any] | None = None) -> tuple[Finding, ...]:
         """Run the adversarial critic over a candidate; record findings (advisory)."""
@@ -99,10 +115,11 @@ class StageContext:
 
         candidate = self.hz.state.get("candidates", {}).get(model_id, {})
         findings = tuple(self.critic.critique(candidate=candidate, reports=reports or {}))
+        turn = self._mint("critique")
         for f in findings:
             self.hz.log.emit(
                 CriticFindingEvent(
-                    **_base(self.hz, model_id),
+                    **_base(self.hz, turn),
                     model_id=model_id,
                     severity=f.severity,
                     category=f.category,
