@@ -87,6 +87,7 @@ def _workflow() -> Workflow:
         id="wf", version="1",
         stages=(Stage("S2_features", s_features), Stage("S_done", s_done)),
         transition=transition,
+        budget_stage="S2_features",
     )
 
 

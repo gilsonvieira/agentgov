@@ -29,10 +29,6 @@ def _base(hz: Harness, turn: str = "plan") -> dict[str, Any]:
 class WorkflowRunner:
     """Executes a governed workflow over a harness, with injected deciders."""
 
-    # Stage id the workflow uses for the feature-proposal node; re-entering it
-    # consumes the iteration budget. Override per workflow if named differently.
-    FEATURE_STAGE = "S2_features"
-
     def __init__(
         self,
         *,
@@ -72,7 +68,7 @@ class WorkflowRunner:
             if self.hz.halted:
                 break
             next_id = self.workflow.transition(self.hz.state, stage_id, outcome)
-            if next_id == self.FEATURE_STAGE:
+            if self.workflow.budget_stage is not None and next_id == self.workflow.budget_stage:
                 feature_attempts += 1
                 if feature_attempts > plan.iteration_budget:
                     if not self._escalate_budget(plan):

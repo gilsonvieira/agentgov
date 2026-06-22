@@ -150,6 +150,7 @@ def credit_workflow(*, di_threshold: float = 0.80) -> Workflow:
             Stage("S5_document", _s5_document, "Reach documentation; Scribe writes at finalize."),
         ),
         transition=_transition,
+        budget_stage="S2_features",
     )
 
 

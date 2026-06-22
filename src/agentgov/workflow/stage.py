@@ -154,6 +154,9 @@ class Workflow:
     stages: tuple[Stage, ...]
     # (state, current_stage_id, outcome) -> next stage id | "DONE" | "HALT"
     transition: Callable[[dict[str, Any], str, StageOutcome], str]
+    # Stage id whose re-entry consumes the iteration budget (the retry loop's
+    # node). None means this workflow has no budgeted node.
+    budget_stage: str | None = None
 
     def stage(self, stage_id: str) -> Stage:
         """Look up a stage by id."""
