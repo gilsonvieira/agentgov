@@ -7,11 +7,11 @@ only at the open nodes. The engine imports no ``pydantic_ai`` / LLM SDK — the
 LLM is a component injected behind the ports, never the conductor.
 
     from agentgov import Harness
-    from agentgov.workflow import WorkflowRunner
-    from agentgov.workflow.workflows.credit import credit_workflow
+    from agentgov.workflow import Workflow, WorkflowRunner
 
+    workflow = Workflow(id=..., version=..., stages=(...), transition=...)
     runner = WorkflowRunner(
-        hz=hz, workflow=credit_workflow(),
+        hz=hz, workflow=workflow,
         planner=..., advisor=..., critic=..., scribe=..., plan_reviewer=...,
     )
     result = runner.run(goal="build a PD scorecard")
